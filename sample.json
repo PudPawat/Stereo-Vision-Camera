@@ -1,0 +1,17 @@
+{
+  "numDisparities": 8,
+  "blockSize": 10,
+  "preFilterType": 1,
+  "preFilterSize": 2,
+  "preFilterCap": 5,
+  "textureThreshold": 10,
+  "uniquenessRatio": 7,
+  "speckleRange": 40,
+  "speckleWindowSize": 7,
+  "disp12MaxDiff": 5,
+  "minDisparity": 5,
+  "Q": [[ 1.00000000e+00, 0.00000000e+00,  0.00000000e+00, -2.98366924e+02],
+ [ 0.00000000e+00,  1.00000000e+00,  0.00000000e+00, -2.40028767e+02],
+ [ 0.00000000e+00,  0.00000000e+00,  0.00000000e+00,  6.37949566e+02],
+ [ 0.00000000e+00,  0.00000000e+00,  2.83563226e-02, -0.00000000e+00]]
+}
