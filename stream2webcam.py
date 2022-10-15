@@ -4,6 +4,8 @@ import json
 import os
 import glob
 from pathlib import Path
+import open3d as o3d
+
 
 ###https://nerian.com/support/calculator/
 
@@ -15,7 +17,7 @@ def nothing(x):
 
 
 class SetUpDisParity():
-    def __init__(self,pathtofile = "calib/2/stereoMap.txt", setupstereoile = "sample.json"):
+    def __init__(self,pathtofile = "calib/4/stereoMap.txt", setupstereoile = "sample.json"):
         self.stereo = cv2.StereoBM_create(numDisparities=16, blockSize=55)
         self.get_cvfile(pathtofile)
 
@@ -26,20 +28,40 @@ class SetUpDisParity():
 
         self.set_setupwindow()
 
-    def get_cvfile(self,pathtofile = "calib/2/stereoMap.txt"):
+
+    def get_cvfile(self,pathtofile = "calib/4/stereoMap.txt"):
         self.stereo = cv2.StereoBM_create(numDisparities=16, blockSize=55)
         cv_file = cv2.FileStorage(pathtofile, cv2.FILE_STORAGE_READ)
+        self.cv_file = cv2.FileStorage(pathtofile, cv2.FILE_STORAGE_APPEND)
         print(cv_file)
         self.Left_Stereo_Map_x = cv_file.getNode("stereoMapL_x").mat()
         self.Left_Stereo_Map_y = cv_file.getNode("stereoMapL_y").mat()
         self.Right_Stereo_Map_x = cv_file.getNode("stereoMapR_x").mat()
         self.Right_Stereo_Map_y = cv_file.getNode("stereoMapR_y").mat()
-        cv_file.release()
+
+        self.q = cv_file.getNode("Q_mxt").mat()
+        self.camera_R_mxt = cv_file.getNode("camera_R_mxt")
+        self.camera_L_mxt = cv_file.getNode("camera_L_mxt")
+
+        # try:
+        #     self.M = cv_file.getNode("M")
+        # except:
+        #     print("Please set M of stereo vision for detecting depth")
+        # cv_file.release()
 
 
     def set_setupwindow(self):
         cv2.namedWindow('disp', cv2.WINDOW_NORMAL)
         cv2.resizeWindow('disp', 600, 600)
+
+        cv2.namedWindow('disparity')
+        cv2.setMouseCallback('disparity', self.mouseRGB)
+
+        cv2.namedWindow('depth')
+        cv2.setMouseCallback('depth', self.mouseRGB)
+
+        cv2.namedWindow('left')
+        cv2.setMouseCallback('left', self.mouseRGB)
         try:
 
             cv2.createTrackbar('numDisparities', 'disp', self.parameters_from_file["numDisparities"], 100, nothing)
@@ -84,6 +106,13 @@ class SetUpDisParity():
         self.stereo.setDisp12MaxDiff(self.parameters_from_file["disp12MaxDiff"])
         self.stereo.setMinDisparity(self.parameters_from_file["minDisparity"])
 
+        try:
+            self.M_coeff = self.parameters_from_file["M_coeff"]
+            self.set_M_coeff = True
+        except:
+            self.set_M_coeff = False
+            print("Please set M of stereo vision for detecting depth")
+
 
     def get_disparity(self,imgL_calib, imgR_calib):
         # Calculating disparity using the StereoBM algorithm
@@ -93,7 +122,7 @@ class SetUpDisParity():
         # is essential to convert it to CV_32F and scale it down 16 times.
 
         # Converting to float32
-        disparity = disparity.astype(np.float32)
+        disparity = disparity.astype(np.float32) ## why /16
         return  disparity
 
 
@@ -107,6 +136,8 @@ class SetUpDisParity():
                               self.Left_Stereo_Map_y,
                               cv2.INTER_LANCZOS4,
                               cv2.BORDER_CONSTANT, 0)
+
+        self.imgL = Left_nice
 
         Right_nice = cv2.remap(imgR_gray,
                                self.Right_Stereo_Map_x,
@@ -180,39 +211,66 @@ class SetUpDisParity():
             retL, imgL = readL.read()
             retR, imgR = readR.read()
 
-            cv2.imshow('img left1', imgL)
-            cv2.imshow('img right1', imgR)
+            # self.imgL = imgL
+
+
+            cv2.imshow('left', imgL)
+            cv2.imshow('right', imgR)
 
             # Proceed only if the frames have been captured
             if retL and retR:
                 
                 disparity,_,disparity_original = self.get_setup_stereo(imgL,imgR)
+
+                self.disparity_original = disparity_original
                 cv2.imshow("disp", disparity)
 
                 norm_image = cv2.normalize(disparity_original, None, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
 
                 norm_image = cv2.convertScaleAbs(norm_image, alpha=255.0)
                 disparity_show = cv2.applyColorMap(norm_image, cv2.COLORMAP_JET)
-                cv2.imshow("disp1", disparity_show)
+                cv2.imshow("disparity", disparity_show)
+                try:
+                    self.depth = self.convert2depth_by_coeff(disparity_original)
+                    # self.depth = self.convert2depth(disparity_original, 0.0105)
+                    local_min = self.depth.min()
+                    local_max = self.depth.max()
+                    # print("depth_min max", local_min, local_max)
+                    # depth_grayscale = (depth - local_min)  / (local_max - local_min)
+                    depth = cv2.normalize(self.depth, None, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX,
+                                               dtype=cv2.CV_32F)
+                    depth_fixtype = cv2.convertScaleAbs(depth, alpha=255)
+                    disparity_show = cv2.applyColorMap(depth_fixtype, cv2.COLORMAP_JET)
 
-                depth = self.convert2depth(norm_image, 0.015)
-                local_min = depth.min()
-                local_max = depth.max()
-                print("depth_min max", local_min, local_max)
-                # depth_grayscale = (depth - local_min)  / (local_max - local_min)
-                depth = cv2.normalize(depth, None, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX,
-                                           dtype=cv2.CV_32F)
-                depth_fixtype = cv2.convertScaleAbs(depth, alpha=255)
-                disparity_show = cv2.applyColorMap(depth_fixtype, cv2.COLORMAP_JET)
+                    cv2.imshow("depth", self.depth )
+                except:
+                    print("Error on depth calculation Please calculate M by depth")
 
-                cv2.imshow("depth",disparity_show)
+
+
+                # points, colors = self.reconstruct_2d_to_3d()
+                #
+                # verts = points.reshape(-1, 3)
+                # colors = colors.reshape(-1, 3)
+                # colors = np.asarray(colors / 10000)  # rescale to 0 to 1
+                # pcd = o3d.geometry.PointCloud()
+                # pcd.points = o3d.utility.Vector3dVector(verts)
+                # pcd.colors = o3d.utility.Vector3dVector(colors)
+                # o3d.visualization.draw_geometries([pcd])
+
+
+
+                # pcd = o3d.geometry.PointCloud()
+                # pcd.points = o3d.utility.Vector3dVector(points)
+                # pcd.colors = o3d.utility.Vector3dVector(colors)
+                # o3d.visualization.draw_geometries([pcd])
 
 
                 key = cv2.waitKey(1)
 
                 if key == ord("c"):
-                    cv2.imwrite("calib/2/image_L_00{}.jpg".format(i), imgL)
-                    cv2.imwrite("calib/2/image_R_00{}.jpg".format(i), imgR)
+                    cv2.imwrite("calib/image_L_00{}.jpg".format(i), imgL)
+                    cv2.imwrite("calib/image_R_00{}.jpg".format(i), imgR)
 
                     i +=1
 
@@ -241,14 +299,90 @@ class SetUpDisParity():
         adjusted_disparity = 2* ( -1*disparity/factor_of_combining_phy_param)
         real_distance = 1/(inv_convergence_dis - adjusted_disparity)
 
-
-
-
         # depth = baseline_dis*focal*np.linalg.inv(disparity)
         # depth = baseline_dis*focal/disparity
         return real_distance
 
+
+    def reconstruct_2d_to_3d(self):
+        # if len(self.imgs.shape) != len(self.img.shape):
+        #     self.imgs = cv2.cvtColor(self.imgs, cv2.COLOR_BGR2GRAY)
+        # bitwiseAnd = cv2.bitwise_and(self.img, self.img, mask=self.imgs)
+        self.X = self.imgL[1]
+        self.Y = self.imgL[0]
+        print(self.q, type(self.q),self.q[2, 3],type(self.q[2, 3]))
+        print(self.q, type(self.q),self.q[3, 3],type(self.q[3, 3]))
+        print(self.q, type(self.q),self.q[3, 2],type(self.q[3, 2]))
+
+        # self.q = self.q.mat()
+        Q = np.asarray([[1, 0, 0, -self.X / 2.0],
+                        [0, -1, 0, self.Y / 2.0],
+                        [0, 0, 0, self.q[2, 3]],
+                        [0, 0, -self.q[3, 2], self.q[3, 3]]])
+
+        # Q = np.float64([[1.0, 0.0, 0.0, -self.X / 2.0],
+        #                 [0.0, -1.0, 0.0, self.Y / 2.0],
+        #                 [0.0, 0.0, 0.0, self.q[2, 3]],
+        #                 [0.0, 0.0, -self.q[3, 2], self.q[3, 3]]])
+        # print("Q",Q)
+        points = cv2.reprojectImageTo3D(self.disparity_original, np.array(Q), True)
+        self.allpoints = points
+        try:
+            colors = cv2.cvtColor(self.imgL, cv2.COLOR_BGR2RGB)
+        except:
+            colors = cv2.cvtColor(self.imgL, cv2.COLOR_GRAY2BGR)
+        # mask = bitwiseAnd > bitwiseAnd.min()
+        # out_points = points[mask]
+        # out_colors = colors[mask]
+        out_points = points
+        out_colors = colors
+
+        return out_points, out_colors
+
+    def convert2depth_by_coeff(self, disparity):
+        # solving for M in the following equation
+        # ||    depth = M * (1/disparity)   ||
+        # for N data points coeff is Nx2 matrix with values
+        # 1/disparity, 1
+        # and depth is Nx1 matrix with depth values
+        # self.M_coeff  = M # from
+        depth =  self.M_coeff * 1/ disparity
+        return depth
+
+    def mouseRGB(self,event, x, y, flags, param):
+        if event == cv2.EVENT_LBUTTONDOWN:  # checks mouse left button down condition
+            # colorsB = disparity_original[y,x,0]
+            # colorsG = disparity_original[y,x,1]
+            # colorsR = disparity_original[y,x,2]
+            disparity_value = self.disparity_original[y, x]
+
+            # print("Red: ",colorsR)
+            # print("Green: ",colorsG)
+            # print("Blue: ",colorsB)
+            print("Disparity: ", disparity_value)
+            print("Coordinates of pixel: X: ", x, "Y: ", y)
+            try:
+                depth_value = self.depth[y, x]
+                print("Physical depth: {} cm".format(depth_value * 1000))
+            except:
+                pass
+
+
+            if self.set_M_coeff:
+                print("M: {}".format(self.M_coeff))
+            else:
+                phy_dis = input("Depth in mm")
+                self.M_coeff = float(phy_dis) * float(disparity_value)
+                self.parameters["M_coeff"] = self.M_coeff
+                with open("sample.json", "w") as outfile:
+                    json.dump(self.parameters, outfile)
+                # self.cv_file.write("M",self.M)
+                # self.cv_file.release()
+                print("M: {}".format(self.M_coeff))
+                self.set_M_coeff= True
 if __name__ == '__main__':
+
+
     readR = cv2.VideoCapture(1, cv2.CAP_DSHOW)
     readL = cv2.VideoCapture(2, cv2.CAP_DSHOW)
 

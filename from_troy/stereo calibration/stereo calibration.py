@@ -18,8 +18,8 @@ size_of_chessboard_squares_mm = 21
 
 imagesLeft = sorted(glob.glob('F:\github\Calib_multiple_stereo\IMG_VIEWS\degree0\\image_L*'))
 imagesRight = sorted(glob.glob('F:\github\Calib_multiple_stereo\IMG_VIEWS\degree0/image_R*'))
-imagesLeft = sorted(glob.glob('F:\github\stereo_vision_scratch\calib\\2/image_L*'))
-imagesRight = sorted(glob.glob('F:\github\stereo_vision_scratch\calib/2/image_R*'))
+imagesLeft = sorted(glob.glob('F:\github\Stereo-Vision-Camera\calib/4/image_L*'))
+imagesRight = sorted(glob.glob('F:\github\Stereo-Vision-Camera\calib/4/image_R*'))
 
 
 # termination criteria
