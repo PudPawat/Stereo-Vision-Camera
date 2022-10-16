@@ -17,19 +17,28 @@ def nothing(x):
 
 
 class SetUpDisParity():
-    def __init__(self,pathtofile = "calib/4/stereoMap.txt", setupstereoile = "sample.json"):
+    def __init__(self,pathtocalibfile = "calib/4/stereoMap.txt", setupstereofile = "sample.json"):
+        '''
+
+        :param pathtofile: path to calibration file stereoMap.txt
+        :param setupstereofile: path to parameters setup for stereovision calculation
+        '''
         self.stereo = cv2.StereoBM_create(numDisparities=16, blockSize=55)
-        self.get_cvfile(pathtofile)
-
+        self.parameters = {}
+        self.__get_cvfile(pathtocalibfile)
         try:
-            self.setup_stereo_from_file(setupstereoile)
+            self.setup_stereo_from_file(setupstereofile)
         except:
-            pass
-
-        self.set_setupwindow()
+            print("There's no setup stereo vision file (.json)")
 
 
-    def get_cvfile(self,pathtofile = "calib/4/stereoMap.txt"):
+    def __get_cvfile(self,pathtofile = "calib/4/stereoMap.txt"):
+        '''
+        --> work on init file
+        To read all calibration parameters
+        :param pathtofile: path to stereoMap.txt
+        :return:
+        '''
         self.stereo = cv2.StereoBM_create(numDisparities=16, blockSize=55)
         cv_file = cv2.FileStorage(pathtofile, cv2.FILE_STORAGE_READ)
         self.cv_file = cv2.FileStorage(pathtofile, cv2.FILE_STORAGE_APPEND)
@@ -43,14 +52,15 @@ class SetUpDisParity():
         self.camera_R_mxt = cv_file.getNode("camera_R_mxt")
         self.camera_L_mxt = cv_file.getNode("camera_L_mxt")
 
-        # try:
-        #     self.M = cv_file.getNode("M")
-        # except:
-        #     print("Please set M of stereo vision for detecting depth")
-        # cv_file.release()
 
 
-    def set_setupwindow(self):
+
+
+    def __set_setupwindow(self):
+        '''
+        To defining or initializing SETUP WINDOWS and Track bar for setting up parameters for disparity
+        :return: None
+        '''
         cv2.namedWindow('disp', cv2.WINDOW_NORMAL)
         cv2.resizeWindow('disp', 600, 600)
 
@@ -76,6 +86,8 @@ class SetUpDisParity():
             cv2.createTrackbar('disp12MaxDiff', 'disp', self.parameters_from_file["disp12MaxDiff"], 200, nothing)
             cv2.createTrackbar('minDisparity', 'disp', self.parameters_from_file["minDisparity"], 200, nothing)
 
+            self.parameters = self.parameters_from_file
+
         except:
             cv2.createTrackbar('numDisparities', 'disp', 1, 100, nothing)
             cv2.createTrackbar('blockSize', 'disp', 5, 50, nothing)
@@ -90,24 +102,30 @@ class SetUpDisParity():
             cv2.createTrackbar('minDisparity', 'disp', 5, 200, nothing)
 
     def setup_stereo_from_file(self, setupfilepath = "sample.json"):
+        '''
+        To get or read
+        :param setupfilepath: setting up parameters for disparity and might be
+        :return:
+        '''
 
         with Path(setupfilepath).open("r") as f:
             self.parameters_from_file = json.load(f)
 
-        self.stereo.setNumDisparities(self.parameters_from_file["numDisparities"])
-        self.stereo.setBlockSize(self.parameters_from_file["blockSize"])
+        self.stereo.setNumDisparities(self.parameters_from_file["numDisparities"]*16)
+        self.stereo.setBlockSize(self.parameters_from_file["blockSize"]* 2 + 5)
         self.stereo.setPreFilterType(self.parameters_from_file["preFilterType"])
-        self.stereo.setPreFilterSize(self.parameters_from_file["preFilterSize"])
+        self.stereo.setPreFilterSize(self.parameters_from_file["preFilterSize"]* 2 + 5)
         self.stereo.setPreFilterCap(self.parameters_from_file["preFilterCap"])
         self.stereo.setTextureThreshold(self.parameters_from_file["textureThreshold"])
         self.stereo.setUniquenessRatio(self.parameters_from_file["uniquenessRatio"])
         self.stereo.setSpeckleRange(self.parameters_from_file["speckleRange"])
-        self.stereo.setSpeckleWindowSize(self.parameters_from_file["speckleWindowSize"])
+        self.stereo.setSpeckleWindowSize(self.parameters_from_file["speckleWindowSize"]* 2)
         self.stereo.setDisp12MaxDiff(self.parameters_from_file["disp12MaxDiff"])
         self.stereo.setMinDisparity(self.parameters_from_file["minDisparity"])
 
         try:
             self.M_coeff = self.parameters_from_file["M_coeff"]
+            self.parameters["M_coeff"] = self.M_coeff
             self.set_M_coeff = True
         except:
             self.set_M_coeff = False
@@ -126,7 +144,7 @@ class SetUpDisParity():
         return  disparity
 
 
-    def get_setup_stereo(self, imgL, imgR):
+    def undistortion(self, imgL, imgR):
 
         imgR_gray = cv2.cvtColor(imgR, cv2.COLOR_BGR2GRAY)
         imgL_gray = cv2.cvtColor(imgL, cv2.COLOR_BGR2GRAY)
@@ -146,6 +164,13 @@ class SetUpDisParity():
                                cv2.BORDER_CONSTANT,
                                0)
 
+        return Left_nice, Right_nice
+
+    def real_time_setup_disparity(self):
+        '''
+        setting getTrackbarPos for realtime setting up and use the previous parameters from sample.json as default values
+        :return:
+        '''
 
         # Updating the self.parameters based on the trackbar positions
         numDisparities = cv2.getTrackbarPos('numDisparities', 'disp') * 16
@@ -187,12 +212,16 @@ class SetUpDisParity():
         self.stereo.setDisp12MaxDiff(disp12MaxDiff)
         self.stereo.setMinDisparity(minDisparity)
 
-        disparity = self.get_disparity(Left_nice,Right_nice)
-
-        # Scaling down the disparity values and normalizing them
-        # disparity = ((disparity - min_dis) / (max_dis - min_dis) * 255).astype(np.uint8)
-        # disparity = ((disparity / 16.0 - minDisparity) / numDisparities)
-        # disparity = cv2.applyColorMap(disparity, cv2.COLORMAP_JET)
+    def cal_disparity(self, calib_L, calib_R):
+        '''
+        calculation for disparity
+        :param calib_L: image left after calibration
+        :param calib_R: image right after calibration
+        :return: disparity_show for showing
+        , disparity_fixtype
+        , disparity real value or called disparity_original
+        '''
+        disparity = self.get_disparity(calib_L,calib_R)
 
         # Filter Disparity Estimate
         local_max = disparity.max()
@@ -204,6 +233,13 @@ class SetUpDisParity():
         return disparity_show, disparity_fixtype, disparity
         
     def setup_disparity_streaming_webcam(self,readL,readR):
+        '''
+
+        :param readL:
+        :param readR:
+        :return:
+        '''
+        self.__set_setupwindow()
         i = 0
         self.parameters = {}
 
@@ -211,43 +247,12 @@ class SetUpDisParity():
             retL, imgL = readL.read()
             retR, imgR = readR.read()
 
-            # self.imgL = imgL
-
-
             cv2.imshow('left', imgL)
             cv2.imshow('right', imgR)
 
             # Proceed only if the frames have been captured
             if retL and retR:
-                
-                disparity,_,disparity_original = self.get_setup_stereo(imgL,imgR)
-
-                self.disparity_original = disparity_original
-                cv2.imshow("disp", disparity)
-
-                norm_image = cv2.normalize(disparity_original, None, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
-
-                norm_image = cv2.convertScaleAbs(norm_image, alpha=255.0)
-                disparity_show = cv2.applyColorMap(norm_image, cv2.COLORMAP_JET)
-                cv2.imshow("disparity", disparity_show)
-                try:
-                    self.depth = self.convert2depth_by_coeff(disparity_original)
-                    # self.depth = self.convert2depth(disparity_original, 0.0105)
-                    local_min = self.depth.min()
-                    local_max = self.depth.max()
-                    # print("depth_min max", local_min, local_max)
-                    # depth_grayscale = (depth - local_min)  / (local_max - local_min)
-                    depth = cv2.normalize(self.depth, None, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX,
-                                               dtype=cv2.CV_32F)
-                    depth_fixtype = cv2.convertScaleAbs(depth, alpha=255)
-                    disparity_show = cv2.applyColorMap(depth_fixtype, cv2.COLORMAP_JET)
-
-                    cv2.imshow("depth", self.depth )
-                except:
-                    print("Error on depth calculation Please calculate M by depth")
-
-
-
+                self.run(imgL, imgR, True)
                 # points, colors = self.reconstruct_2d_to_3d()
                 #
                 # verts = points.reshape(-1, 3)
@@ -258,14 +263,10 @@ class SetUpDisParity():
                 # pcd.colors = o3d.utility.Vector3dVector(colors)
                 # o3d.visualization.draw_geometries([pcd])
 
-
-
                 # pcd = o3d.geometry.PointCloud()
                 # pcd.points = o3d.utility.Vector3dVector(points)
                 # pcd.colors = o3d.utility.Vector3dVector(colors)
                 # o3d.visualization.draw_geometries([pcd])
-
-
                 key = cv2.waitKey(1)
 
                 if key == ord("c"):
@@ -279,12 +280,6 @@ class SetUpDisParity():
                     with open("sample.json", "w") as outfile:
                         json.dump(self.parameters, outfile)
 
-
-    def convert23D(self,disparity, Q):
-        Q = np.asarray(Q)
-        depth = cv2.reprojectImageTo3D(disparity, Q)
-
-        return depth
 
     def convert2depth(self,disparity, baseline_dis, focal = 18):
 
@@ -303,8 +298,35 @@ class SetUpDisParity():
         # depth = baseline_dis*focal/disparity
         return real_distance
 
+    def convert2depth_by_coeff(self, disparity):
+        '''
+        convert depth by using calibration coeff called M
+        M can be set in json file
 
+        if you don't know M (M_coeff) in json file, please delete and run the code again it will automatically ask for setting
+        :param disparity:
+        :return:
+        '''
+        # solving for M in the following equation
+        # ||    depth = M * (1/disparity)   ||
+        # for N data points coeff is Nx2 matrix with values
+        # 1/disparity, 1
+        # and depth is Nx1 matrix with depth values
+        # self.M_coeff  = M # from
+        depth =  self.M_coeff * 1/ disparity
+        return depth
+
+
+    def convert23D(self,disparity, Q):
+        Q = np.asarray(Q)
+        depth = cv2.reprojectImageTo3D(disparity, Q)
+
+        return depth
     def reconstruct_2d_to_3d(self):
+        '''
+        HAVEN'T DONE
+        :return:
+        '''
         # if len(self.imgs.shape) != len(self.img.shape):
         #     self.imgs = cv2.cvtColor(self.imgs, cv2.COLOR_BGR2GRAY)
         # bitwiseAnd = cv2.bitwise_and(self.img, self.img, mask=self.imgs)
@@ -320,10 +342,10 @@ class SetUpDisParity():
                         [0, 0, 0, self.q[2, 3]],
                         [0, 0, -self.q[3, 2], self.q[3, 3]]])
 
-        # Q = np.float64([[1.0, 0.0, 0.0, -self.X / 2.0],
-        #                 [0.0, -1.0, 0.0, self.Y / 2.0],
-        #                 [0.0, 0.0, 0.0, self.q[2, 3]],
-        #                 [0.0, 0.0, -self.q[3, 2], self.q[3, 3]]])
+        Q = np.float64([[1.0, 0.0, 0.0, -self.X / 2.0],
+                        [0.0, -1.0, 0.0, self.Y / 2.0],
+                        [0.0, 0.0, 0.0, self.q[2, 3]],
+                        [0.0, 0.0, -self.q[3, 2], self.q[3, 3]]])
         # print("Q",Q)
         points = cv2.reprojectImageTo3D(self.disparity_original, np.array(Q), True)
         self.allpoints = points
@@ -331,34 +353,26 @@ class SetUpDisParity():
             colors = cv2.cvtColor(self.imgL, cv2.COLOR_BGR2RGB)
         except:
             colors = cv2.cvtColor(self.imgL, cv2.COLOR_GRAY2BGR)
-        # mask = bitwiseAnd > bitwiseAnd.min()
-        # out_points = points[mask]
-        # out_colors = colors[mask]
         out_points = points
         out_colors = colors
 
         return out_points, out_colors
 
-    def convert2depth_by_coeff(self, disparity):
-        # solving for M in the following equation
-        # ||    depth = M * (1/disparity)   ||
-        # for N data points coeff is Nx2 matrix with values
-        # 1/disparity, 1
-        # and depth is Nx1 matrix with depth values
-        # self.M_coeff  = M # from
-        depth =  self.M_coeff * 1/ disparity
-        return depth
 
     def mouseRGB(self,event, x, y, flags, param):
-        if event == cv2.EVENT_LBUTTONDOWN:  # checks mouse left button down condition
-            # colorsB = disparity_original[y,x,0]
-            # colorsG = disparity_original[y,x,1]
-            # colorsR = disparity_original[y,x,2]
-            disparity_value = self.disparity_original[y, x]
+        '''
+        Mouse event to measure depth, disparity
 
-            # print("Red: ",colorsR)
-            # print("Green: ",colorsG)
-            # print("Blue: ",colorsB)
+        But ... if there's no M yet, it will be ask to set M by clicking a position and giving the depth of the position
+        :param event:
+        :param x:
+        :param y:
+        :param flags:
+        :param param:
+        :return:
+        '''
+        if event == cv2.EVENT_LBUTTONDOWN:  # checks mouse left button down condition
+            disparity_value = self.disparity_original[y, x]
             print("Disparity: ", disparity_value)
             print("Coordinates of pixel: X: ", x, "Y: ", y)
             try:
@@ -376,16 +390,73 @@ class SetUpDisParity():
                 self.parameters["M_coeff"] = self.M_coeff
                 with open("sample.json", "w") as outfile:
                     json.dump(self.parameters, outfile)
-                # self.cv_file.write("M",self.M)
-                # self.cv_file.release()
                 print("M: {}".format(self.M_coeff))
                 self.set_M_coeff= True
+
+    # def setup_for_run(self):
+
+    def run(self, imgL, imgR, setup = False):
+        '''
+        after all setting have .json and .txt from calibration then use this function for only run stereovision by set parameters
+        :param imgL:
+        :param imgR:
+        :return:
+        '''
+        nice_L, nice_R = self.undistortion(imgL, imgR)
+        if setup:
+            self.real_time_setup_disparity()
+
+        disparity, _, disparity_original = self.cal_disparity(nice_L, nice_R)
+        self.disparity_original = disparity_original
+
+        norm_image = cv2.normalize(disparity_original, None, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX,
+                                   dtype=cv2.CV_32F)
+
+        norm_image = cv2.convertScaleAbs(norm_image, alpha=255.0)
+        disparity_show = cv2.applyColorMap(norm_image, cv2.COLORMAP_JET)
+        cv2.imshow("disparity", disparity_show)
+        cv2.waitKey(1)
+        try:
+            self.depth = self.convert2depth_by_coeff(disparity_original)
+            # depth = cv2.normalize(self.depth, None, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX,
+            #                       dtype=cv2.CV_32F)
+            # depth_fixtype = cv2.convertScaleAbs(depth, alpha=255)
+            # disparity_show = cv2.applyColorMap(depth_fixtype, cv2.COLORMAP_JET)
+            cv2.imshow("depth", self.depth)
+            return self.depth
+        except:
+            print("Error on depth calculation Please calculate M by depth")
+
+        # cv2.imshow("disp", disparity)
+
+
+
+
+
+def run(readL,readR):
+    '''
+    EXAMPLE CODE for funning
+    :param readL:
+    :param readR:
+    :return:
+    '''
+
+    while True:
+        retR, imgL = readL.read()
+        retL, imgR = readR.read()
+        # cv2.imshow('left', imgL)
+        # cv2.imshow('right', imgR)
+
+        if retL and retR:
+            Setup.run(imgL, imgR)
 if __name__ == '__main__':
 
 
     readR = cv2.VideoCapture(1, cv2.CAP_DSHOW)
     readL = cv2.VideoCapture(2, cv2.CAP_DSHOW)
 
-
     Setup = SetUpDisParity()
+
     Setup.setup_disparity_streaming_webcam(readL, readR)
+
+    depth = run(readL,readR)
